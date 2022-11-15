@@ -1,0 +1,882 @@
+global admin_w;
+global admin_w_wc;
+global maximum_numbs;
+global minimum_numbs;
+
+() save_data(int draw_balance, cell round_info, cell ticket_list_round, cell win_info, cell msg_to_user) impure inline_ref {
+    set_data( begin_cell()
+        .store_grams(draw_balance)
+        .store_dict(round_info)
+        .store_dict(ticket_list_round)
+        .store_dict(win_info)
+        .store_dict(msg_to_user)
+   .end_cell());
+}
+
+_ unpack_data() inline_ref {
+    var ds = begin_parse(get_data());
+    var res = (
+        ds~load_grams(),    ;; draw_balance
+        ds~load_dict(),     ;; round_info
+        ds~load_dict(),     ;; ticket_list_round
+        ds~load_dict(),      ;; win_info
+        ds~load_dict()      ;; msg_to_user
+    );
+    ds.end_parse();
+    return res;
+}
+;;;;;;;;;;;;;;;;
+builder pack_ticket_list_round(int ticket, int adr, int wc_adr, int user_pay_nano) inline_ref {
+    return begin_cell()
+        .store_uint(ticket, 32)
+        .store_uint(adr, 256)
+        .store_uint(wc_adr, 32)
+        .store_uint(user_pay_nano, 64);
+}
+
+(int, int, int, int) unpack_ticket_list_round(slice ticket_list_round) inline_ref {
+    var rest = (
+        ticket_list_round~load_uint(32), ;; ticket
+        ticket_list_round~load_uint(256), ;; adr
+        ticket_list_round~load_uint(32), ;; wc_adr
+        ticket_list_round~load_uint(64) ;; user_pay_nano
+    );
+    return rest;
+}
+;;;;;;;;;;;;;;;;
+
+builder pack_round_info(int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell discount_list) inline_ref {
+    return begin_cell()
+        .store_grams(price_ticket)
+        .store_uint(round_num, 64)
+        .store_uint(time_fn, 64)
+        .store_dict(win_combo_hist)
+        .store_dict(discount_list);
+}
+
+( int, int, int, cell, cell) unpack_round_info(slice round_info) inline_ref {
+    return (
+        round_info~load_grams(),  ;; price_ticket
+        round_info~load_uint(64), ;; round_num
+        round_info~load_uint(64), ;; time_fn
+        round_info~load_dict(),   ;; win_combo_hist
+        round_info~load_dict()    ;; discount_list
+    );
+}
+;;;;;;;;;;;;;;;;
+  
+builder pack_users_win(int number_coincidences, int ticket, int wc_adr, int adr, int user_pay_nano) inline_ref {
+    return begin_cell()
+    .store_uint(number_coincidences, 32)
+    .store_uint(ticket, 32)
+    .store_uint(wc_adr, 32)
+    .store_uint(adr, 256)
+    .store_uint(user_pay_nano, 64);
+}
+
+(int, int, int, int, int) unpack_users_win(slice users_win_sl) {
+    return (
+        users_win_sl~load_uint(32), ;; number_coincidences
+        users_win_sl~load_uint(32), ;; ticket
+        users_win_sl~load_uint(32), ;; wc_adr
+        users_win_sl~load_uint(256), ;; adr
+        users_win_sl~load_uint(64) ;; user_pay_nano
+    );
+}
+
+;;;;;;;;;;;;;;;;
+
+builder pack_win_info(cell win_list, cell coincidences_info) inline_ref {
+    return begin_cell()
+        .store_dict(win_list)
+        .store_dict(coincidences_info);
+}
+
+(cell, cell) unpack_win_info(slice win_info_sls) inline_ref {
+    return (
+        win_info_sls~load_dict(),   ;; win_list
+        win_info_sls~load_dict()    ;; coincidences_info
+    );
+}
+;;;;;;;;;;;;;;;;
+
+builder pack_coincidences_info(int count_combo_1, int count_combo_2, int count_combo_3, int count_combo_4, int count_combo_5, int count_combo_6) {
+    return begin_cell()
+     .store_uint(count_combo_1, 64)
+     .store_uint(count_combo_2, 64)
+     .store_uint(count_combo_3, 64)
+     .store_uint(count_combo_4, 64)
+     .store_uint(count_combo_5, 64)
+     .store_uint(count_combo_6, 64);
+}
+
+(int, int, int, int, int, int) unpack_coincidences_info(slice coincidences_info) {
+    return (
+        coincidences_info~load_uint(64),    ;; count_combo_1
+        coincidences_info~load_uint(64),    ;; count_combo_2
+        coincidences_info~load_uint(64),    ;; count_combo_3
+        coincidences_info~load_uint(64),    ;; count_combo_4
+        coincidences_info~load_uint(64),    ;; count_combo_5
+        coincidences_info~load_uint(64)     ;; count_combo_6
+    );
+}
+
+;;;;;;;;;;;;;;;;
+(int, int, int ,cell, cell) get_round_info_now(round_info) inline_ref {
+    slice round_info_slc = round_info.begin_parse();
+    return  unpack_round_info(round_info_slc);
+}
+;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;
+(cell, cell) get_win_infos(win_info) inline_ref {
+    slice win_info_slc = win_info.begin_parse();
+    return  unpack_win_info(win_info_slc);
+}
+
+(int, int, int, int, int, int) get_coincidences_info(cell coincidences_info) {
+    slice coincidences_info_slc = coincidences_info.begin_parse();
+    return  unpack_coincidences_info(coincidences_info_slc);
+}
+;;;;;;;;;;;;;;;;
+
+int balance() inline_ref method_id {
+    return get_balance().pair_first();
+}
+
+slice parse_sender_address(cell in_msg_full) inline_ref { ;; +
+    var cs = in_msg_full.begin_parse();
+    cs~skip_bits(4);
+    return cs~load_msg_addr();
+}
+
+() send_grams(int wc, int addr, int grams) impure inline_ref { ;; +
+    var cs = get_data().begin_parse();
+    var (draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = (cs~load_grams(),cs~load_dict(),  cs~load_dict(),  cs~load_dict(), cs~load_dict());
+          
+    slice msg_usr = msg_to_user.begin_parse();
+
+    cell msg = begin_cell()
+        .store_uint(196, 9)
+        .store_int(wc, 8)
+        .store_uint(addr, 256)
+        .store_grams(grams)
+        .store_uint(0, 107)
+        .store_slice(msg_usr)
+        .end_cell(); 
+
+    send_raw_message(msg, 3);
+}
+
+int gen_combination(int coef) inline_ref { ;; +
+    randomize(coef);
+    int ticket_u = rand(maximum_numbs);
+    int rez = 2;
+    while(ticket_u > maximum_numbs | (ticket_u < minimum_numbs)) {
+        randomize((coef + now()) / rez);
+        ticket_u = rand(maximum_numbs);
+        rez += 1;
+    }
+    return ticket_u;
+}
+
+int check_ticket_position(int user_ticket, int win_ticket) inline_ref  {
+    int count = 0;
+    int i = 0;
+    int win_combo_sv = win_ticket;
+    int usr_combo_sv = user_ticket;
+
+    while(i < 6) {
+        (int com_i_w, int res_w ) = win_combo_sv /% 10;
+        (int com_i_u, int res_u ) = usr_combo_sv /% 10;
+
+        usr_combo_sv = com_i_u;
+        win_combo_sv = com_i_w;
+
+        if(res_w == res_u){
+            count += 1;
+        }
+        i  += 1;
+    }
+    return count;
+}
+
+() add_user_ticket(int user_pay_nano, int round_num, int wallet_wc, int wallet_addr, int count_ticket, cell round_info, cell ticket_lists, cell win_info, int draw_balance, cell msg_to_user) impure inline_ref {
+    var (ticket_list_round, f?) = ticket_lists.udict_get?(32, round_num);
+    cell ticket_list_round_c = new_dict();
+    if(f?) {
+        ticket_list_round_c = ticket_list_round~load_dict();
+    }
+    (int max_id, slice round_info_pers, int f_mx) = ticket_list_round_c.udict_get_max?(32);
+    int ids_starart = 0;
+    if ( f_mx ) {
+        ids_starart = max_id;
+    }
+    int chng = count_ticket;
+    while (chng > 0) {
+        (int v1, int v2 ) =  now() /% ( (count_ticket * rand(2022 + chng)) + chng );
+        int coef = balance() + v1 + v2;
+        int ticket = gen_combination(coef);
+        builder ticket_info_n = pack_ticket_list_round(ticket, wallet_addr, wallet_wc, user_pay_nano);
+        int ids = ids_starart + chng;
+        ticket_list_round_c~udict_add_builder?(32, ids, ticket_info_n);
+        chng -= 1;
+    }
+    ticket_lists~udict_set_builder(32 , round_num, begin_cell().store_dict(ticket_list_round_c));
+    save_data(draw_balance, round_info, ticket_lists, win_info, msg_to_user);
+}
+
+() create_ticket_user(int wallet_wc, int wallet_addr, int msg_value) impure inline_ref {
+    var (draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data(); ;; TODO
+    (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell discount_list) = get_round_info_now(round_info);
+    var (user_discount, f_user_discount?) = discount_list.udict_get?(256, wallet_addr);
+    int price_ticket_p = price_ticket;
+    if(f_user_discount?) {
+        int discount_count = user_discount~load_uint(32);
+        price_ticket_p = price_ticket - ( price_ticket * discount_count ~/ 100);
+    }
+    (int count_ticket, int back_gramm ) =  msg_value /% price_ticket_p;
+    if ( back_gramm > 100000000) {
+        send_grams(wallet_wc, wallet_addr, back_gramm);
+    }
+    int round_nums = round_num;
+    if(now() >= time_fn) {
+        round_nums += 1;
+    }
+    cell round_info_new = pack_round_info(price_ticket, round_num, time_fn, win_combo_hist, discount_list).end_cell();
+    add_user_ticket(price_ticket_p, round_nums, wallet_wc, wallet_addr, count_ticket, round_info_new, ticket_lists, win_info, draw_balance, msg_to_user);
+}
+
+() init_contract(slice in_msg_body) impure {
+    int price_ticket = in_msg_body~load_grams();
+    cell round_info_null = pack_round_info( price_ticket, 1, now() + (3600 * 24 ), new_dict(), new_dict()).end_cell();
+    cell win_info_null = begin_cell().store_dict(new_dict()).store_dict(new_dict()).end_cell();
+
+    cell dict_body_msg = begin_cell().store_slice(in_msg_body).end_cell();
+    save_data(0, round_info_null, new_dict(), win_info_null, dict_body_msg);
+}
+
+() add_promo_ticket_users(slice in_msg_body) impure {
+    int count_ticket = in_msg_body~load_uint(32);
+    int round_num = in_msg_body~load_uint(32);
+    slice wallet_user = in_msg_body~load_msg_addr();
+    
+    var (draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data();
+    (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell discount_list) = get_round_info_now(round_info);
+    (int  wallet_wc, int wallet_addr) = parse_std_addr(wallet_user);
+    add_user_ticket(price_ticket, round_num, wallet_wc, wallet_addr, count_ticket, round_info, ticket_lists, win_info, draw_balance, msg_to_user);
+}
+
+() add_discount(slice in_msg_body) impure {
+    int discount_count_proc = in_msg_body~load_uint(32);
+    slice holder_address = in_msg_body~load_msg_addr();
+    
+    var (draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data();
+    (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell discount_list) = get_round_info_now(round_info);
+
+    (int holder_wc, int holder_addr) = parse_std_addr(holder_address);
+    
+
+    if(discount_count_proc == 0) {
+        discount_list~udict_delete?(256, holder_addr);
+    } else {
+        builder discount_count_proc_b = begin_cell().store_uint(discount_count_proc, 32);
+        discount_list~udict_set_builder(256, holder_addr, discount_count_proc_b); 
+    }
+   
+    cell round_info_new = pack_round_info(price_ticket, round_num, time_fn, win_combo_hist, discount_list).end_cell();
+    save_data(draw_balance, round_info_new, ticket_lists, win_info, msg_to_user);                   
+}
+
+() set_new_price_ticket(slice in_msg_body) impure {
+    int price_ticket_new = in_msg_body~load_grams();
+
+    var (draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data(); ;; tt
+    (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell discount_list) = get_round_info_now(round_info);
+    cell round_info_new = pack_round_info(price_ticket_new, round_num, time_fn, win_combo_hist, discount_list).end_cell();
+    save_data(draw_balance, round_info_new, ticket_lists, win_info, msg_to_user);
+}
+
+() check_users_ticket_win(slice in_msg_body) impure {
+
+    int min_chk_id = in_msg_body~load_uint(32);
+    int max_chk_id = in_msg_body~load_uint(32);
+
+    var (draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data();
+    (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell discount_list) = get_round_info_now(round_info); 
+
+    if ( now() >= time_fn) {
+        var (win_list, coincidences_info) = get_win_infos(win_info);
+        var (coincidences_info_sl, f_coincidences_info?) = coincidences_info.udict_get?(32, round_num);
+        cell coincidences_info_cl = new_dict();
+
+        int count_combo_1 = 0; 
+        int count_combo_2 = 0;
+        int count_combo_3 = 0;
+        int count_combo_4 = 0;
+        int count_combo_5 = 0;
+        int count_combo_6 = 0;
+
+        if(f_coincidences_info?) {
+            (int cc_1, int cc_2, int cc_3, int cc_4, int cc_5, int cc_6) = unpack_coincidences_info(coincidences_info_sl);
+            count_combo_1 = cc_1;
+            count_combo_2 = cc_2;
+            count_combo_3 = cc_3;
+            count_combo_4 = cc_4;
+            count_combo_5 = cc_5;
+            count_combo_6 = cc_6;
+        }
+
+        var (win_list_users, f_win_list_users?) = win_list.udict_get?(32, round_num);
+        cell users_win_list = new_dict();
+
+        if(f_win_list_users?) {
+            users_win_list = win_list_users~load_dict();
+        }
+                  
+        var (win_comb_round, f_win_comb_round?) = win_combo_hist.udict_get?(32, round_num);       
+        int win_combo = 0;
+
+        if(f_win_comb_round?) {
+            win_combo = win_comb_round~load_uint(32);
+        } else {
+            (int vc1, int vc2) = balance() /% round_num;
+            int win_coef = ((vc1 + (vc1 + vc2 + now()) ~/ round_num ) - vc2) + 1;
+            win_combo = gen_combination(win_coef);
+            builder win_comb_b = begin_cell().store_uint(win_combo, 32);
+            win_combo_hist~udict_add_builder?(32, round_num, win_comb_b);
+            round_info = pack_round_info(price_ticket, round_num, time_fn, win_combo_hist, discount_list).end_cell();
+        }
+
+        var (ticket_list_round_sl, f_ticket_list_round?) = ticket_lists.udict_get?(32, round_num);
+
+        cell win_info_new = win_info;
+
+        if(f_ticket_list_round?) {
+            int check_id = min_chk_id;
+
+            var id = min_chk_id - 1;
+            cell ticket_lists_round_c = ticket_list_round_sl~load_dict();
+            do {
+                (id, var cs, var f) = ticket_lists_round_c.udict_get_next?(32, id);
+                if (f) {
+                    if(id <= max_chk_id) {
+                        var (ticket, adr, wc_adr, user_pay_nano) = unpack_ticket_list_round(cs);
+                        int number_coincidences = check_ticket_position(ticket, win_combo);
+                        
+                        ifnot(number_coincidences == 0) {
+                            if(number_coincidences == 1) {
+                                count_combo_1 += 1;
+                            } elseif(number_coincidences == 2) {
+                                count_combo_2 += 1;
+                            } elseif(number_coincidences == 3) {
+                                count_combo_3 += 1;
+                            } elseif(number_coincidences == 4) {
+                                count_combo_4 += 1;
+                            } elseif(number_coincidences == 5) {
+                                count_combo_5 += 1;
+                            } elseif(number_coincidences == 6) {
+                                count_combo_6 += 1;
+                            }
+                            builder users_win_b = pack_users_win(number_coincidences, ticket, wc_adr, adr, user_pay_nano);
+                            users_win_list~udict_add_builder?(32, id, users_win_b);
+                        }
+                    } else {
+                        f = 0;
+                    }
+                }
+            } until (~ f);
+                    
+            builder round_win_lists = begin_cell().store_dict(users_win_list);
+            win_list~udict_set_builder(32, round_num, round_win_lists);
+
+            builder coincidences_info_b = pack_coincidences_info(count_combo_1, count_combo_2, count_combo_3, count_combo_4, count_combo_5, count_combo_6);
+            coincidences_info~udict_set_builder(32, round_num, coincidences_info_b);
+
+            win_info_new = pack_win_info(win_list, coincidences_info).end_cell();
+        }
+        save_data(draw_balance, round_info, ticket_lists, win_info_new, msg_to_user);
+    }
+}
+
+    () send_ton_to_winners(slice in_msg_body) impure {
+        int min_chk_id = in_msg_body~load_uint(32);
+        int max_chk_id = in_msg_body~load_uint(32);
+
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data(); ;; TODO
+        (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell discount_list) = get_round_info_now(round_info);
+        if ( now() >= time_fn) {
+            ;; todo-gafi
+            int active_pull = draw_balance - ((draw_balance * 5) ~/ 100); ;; разыгрываемая сумма раунда
+
+            (cell win_list, cell coincidences_info) = get_win_infos(win_info);
+            var (win_list_users, f_win_list_users?) = win_list.udict_get?(32, round_num);
+            var (coincidences_info_sl, f_coincidences_info?) = coincidences_info.udict_get?(32, round_num);
+
+            if(f_coincidences_info? & f_win_list_users?) {
+                (int cc_1, int cc_2, int cc_3, int cc_4, int cc_5, int cc_6) = unpack_coincidences_info(coincidences_info_sl);
+                cell users_win_list = win_list_users~load_dict();
+                int check_id = min_chk_id;
+
+                var id = min_chk_id - 1;
+                do {
+                    (id, var users_win_list_sl, var f) = users_win_list.udict_get_next?(32, id);
+                    if (f) {
+                        if(id <= max_chk_id) {
+                            (int number_coincidences, int ticket, int wc_adr, int adr, int user_pay_nano) = unpack_users_win(users_win_list_sl);
+                            if((cc_6 == 0) & (cc_5 == 0) & (cc_4 == 0) & (cc_3 == 0) & (cc_2 == 0)) {
+                                ifnot(cc_1 == 0) {
+                                    if (number_coincidences == 1){
+                                        send_grams( wc_adr , adr, user_pay_nano);
+                                    }
+                                }
+                            } else {
+                                if(cc_6 == 0) {
+                                    int win_sum = 0;
+
+                                    if( number_coincidences == 5) {
+                                        win_sum = ((active_pull * 45) ~/ 100) ~/ cc_5;
+                                    } elseif( number_coincidences == 4 ) {
+                                        win_sum = ((active_pull * 25) ~/ 100) ~/ cc_4;
+                                    } elseif( number_coincidences == 3) {
+                                        win_sum = ((active_pull * 15) ~/ 100) ~/ cc_3;
+                                    } elseif( number_coincidences == 2) {
+                                        win_sum = ((active_pull * 10) ~/ 100) ~/ cc_2;
+                                    }
+                                
+                                    ifnot(win_sum == 0) {
+                                        send_grams( wc_adr , adr, win_sum );
+                                    }
+                                } else {
+                                    if(number_coincidences == 6) {
+                                        send_grams(wc_adr, adr, (draw_balance ~/ cc_6) );
+                                    }
+                                }
+                            }
+                        } else {
+                            f = 0;
+                        }
+                    }
+                } until (~ f);
+            }
+        }
+    }
+
+cell meth_clear_old_history_cell(int del_round_n, int round_num, cell history) impure inline_ref {
+    var (history_sls, fnds?) = history.udict_get?(32, del_round_n);
+    if(fnds?) {
+        if((round_num - 3) > del_round_n) {
+            history~udict_delete?(32, del_round_n);
+        }
+    }
+    return history;
+}
+
+() clear_history_round(slice in_msg_body){
+    
+    int del_round_n = in_msg_body~load_uint(32);
+    var ( draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data();
+    (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell discount_list) = get_round_info_now(round_info);
+    (cell win_list, cell coincidences_info) = get_win_infos(win_info);
+    ;; clear coincidences
+    cell n_cell_coincidences_info = meth_clear_old_history_cell(round_num, del_round_n, coincidences_info);
+    ;;clear win_list
+    cell n_cell_win_list = meth_clear_old_history_cell(round_num, del_round_n, win_list);
+    ;;clear ticket_lists
+    cell n_cell_ticket_lists = meth_clear_old_history_cell(round_num, del_round_n, ticket_lists);
+    ;;clear win_combo_hist
+    cell n_cell_win_combo_hist = meth_clear_old_history_cell(round_num, del_round_n, win_combo_hist);
+    
+    ;; re save coincidences && win_list
+    builder win_info_new = pack_win_info( n_cell_win_list, n_cell_coincidences_info);
+    cell round_info_new = pack_round_info(price_ticket, round_num, time_fn, n_cell_win_combo_hist, discount_list).end_cell();
+    save_data(draw_balance, round_info_new, n_cell_ticket_lists, win_info_new.end_cell(), msg_to_user);
+}
+
+() check_contract_round(int wc, int addr, int amount, slice in_msg_body) impure {
+    var (draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data(); ;; tt
+    (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell discount_list) = get_round_info_now(round_info);
+    if ( now() >= time_fn) {
+        cell round_info_new = pack_round_info(price_ticket, round_num + 1, now() + (3600 * 24 ), win_combo_hist, discount_list).end_cell();
+        save_data(draw_balance, round_info_new, ticket_lists, win_info, msg_to_user);
+    }
+}
+
+() service_fee_get() impure {
+    var ( draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data();
+    (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell discount_list) = get_round_info_now(round_info); 
+    if ( now() >= time_fn) {
+        int adm_amount_get = balance() * 10 ~/ 100;
+        send_grams(admin_w_wc, admin_w, adm_amount_get);
+        int pull_active = get_balance().pair_first();
+        save_data(pull_active, round_info, ticket_lists, win_info, msg_to_user);
+    }
+}
+
+    () save_msg_send_win(int src_wc, int src_addr,  slice in_msg_body) impure {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data(); ;; TODO
+        cell dict_body_msg = begin_cell().store_slice(in_msg_body).end_cell();
+        save_data(draw_balance, round_info, ticket_lists, win_info, dict_body_msg);
+        set_data( begin_cell().store_grams(draw_balance).store_dict(round_info).store_dict(ticket_lists).store_dict(win_info).store_dict(dict_body_msg).end_cell());
+        send_grams(src_wc, src_addr, 5050000);
+    }
+
+    int admin_controll(int wc, int addr, int amount, slice in_msg_body) impure {
+        ;;//////////////////////////////////////////////////;;
+            ;;7000 - Иницилизоровать и запустить контракт
+
+            ;;7001 - Перелистывание раунда
+            ;;7002 - Проверка билетов юзеров на победые комбинации +
+            ;;7003 - Отправа выигрыша за раунд победителям +
+            ;;7004 - Очищение старых историй +
+            ;;7005 - админ отчисление 10%
+
+                        ;;;;;;;;;;;;;;;;
+            ;;7010 - Апдейт стоимости билета
+            ;;7011 - Добавить скидки за холд (единично)
+            ;;7013 - Добавить промо билеты
+            ;;7014 - Пополнение пула баланса контракта без начисления билетов
+
+            ;;7021 - Получить баланс контракта обратно (тест)
+        ;;//////////////////////////////////////////////////;;
+
+        if(addr == admin_w) {
+
+            if(amount == 71717000) { ;;0.071717
+                save_msg_send_win(wc, addr, in_msg_body);
+                return 0;
+            }
+                
+            ifnot (in_msg_body.slice_empty?()) {
+                int comand_code = in_msg_body~load_uint(32);
+
+                ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+                ;;7000 - Иницилизоровать и запустить контракт
+                if(comand_code == 7000){
+                    init_contract(in_msg_body);
+                    return 0;
+                }
+
+                ;;7001 - Перелистывание раунда
+                if(comand_code == 7001){ 
+                    check_contract_round( wc, addr, amount, in_msg_body);
+                    return 0;
+                }
+
+                ;;7002 - Проверка билетов юзеров на победые комбинации
+                if(comand_code == 7002) {
+                    check_users_ticket_win(in_msg_body);
+                    return 0;
+                }
+
+                ;;7003 - Отправа выигрыша за раунд победителям
+                if(comand_code == 7003) {
+                    send_ton_to_winners(in_msg_body);
+                    return 0;
+                }
+
+                ;;7004 - Очищение старых истории
+                if(comand_code == 7004){
+                    clear_history_round(in_msg_body);
+                    return 0;
+                }
+
+                ;;7005 - админ отчисление 10%
+                if(comand_code == 7005) {
+                    service_fee_get();
+                    return 0;
+                }
+                
+                ;;7010 - Апдейт стоимости билета
+                if(comand_code == 7010) {
+                    set_new_price_ticket(in_msg_body);
+                    return 0;
+                }
+
+                ;;7011 - Добавить скидки за холд (единично)
+                if(comand_code == 7011){
+                    add_discount(in_msg_body);
+                    return 0;
+                }
+
+                ;;7013 - Добавить промо билет 
+                if(comand_code == 7013){
+                    add_promo_ticket_users(in_msg_body);
+                    return 0;
+                }
+
+                ;;7014 - Пополнение пула баланса контракта без начисления билетов
+                if(comand_code == 7014){
+                    return 0;
+                }
+
+                ;;7021 - Получить баланс контракта обратно (тест
+                if(comand_code == 7021){
+                    send_grams(admin_w_wc, admin_w, balance() - 10000000);
+                    return 0;
+                }
+                
+                ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+            }
+        }
+
+        return 1;
+    }
+
+    () recv_internal(int balance, int msg_value, cell in_msg_full, slice in_msg_body) impure {
+        admin_w = 80031506412991430843379617034934673684292344196673306218566196442271464621794; ;;todo admin id wallet
+        admin_w_wc = 0; ;; wc admin wallet
+
+        ;;300 * 4; ;; добавочное ремя для расчета окончания раунда (300 * 5) = +- 30 min (300) = +- 5 min
+        maximum_numbs = 999999; ;; максимальная граница для генерации билетов
+        minimum_numbs = 100000; ;; минимальная граница для генерации билетов
+
+        slice sender_address = parse_sender_address(in_msg_full);
+        (int src_wc, int src_addr) = parse_std_addr(sender_address); ;; получаем айди кошелька оптатившего
+
+        if (admin_controll(src_wc, src_addr, msg_value, in_msg_body) == 1) {
+            create_ticket_user( src_wc, src_addr, msg_value);
+        }
+    }
+
+    ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    ;; method_id info
+    ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+    ;; MAIN INFO method_id
+    var get_ticket_from_round(int round, int ids_min, int ids_max) method_id {
+        var (draw_balance, round_info, ticket_lists, win_info , msg_to_user ) = unpack_data();
+        var l = empty_tuple();
+        var (ticket_lists_round, f_ticket_lists_round?) = ticket_lists.udict_get?(32, round);
+        if(f_ticket_lists_round?) {
+            var id = ids_min - 1;
+            cell ticket_lists_round_c = ticket_lists_round~load_dict();
+            do {
+                (id, var cs, var f) = ticket_lists_round_c.udict_get_next?(32, id);
+                if (f) {
+                    if(id <= ids_max) {
+                        var (ticket, adr, wc_adr, user_pay_nano) = unpack_ticket_list_round(cs);
+                        l = cons([ id, ticket, adr, wc_adr, user_pay_nano, round], l);
+                    } else {
+                        return l;
+                    }
+                }
+            } until (~ f);
+        }
+        return l;
+    }
+
+    var get_round_info_G() method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data();
+        (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell win_list_users) = get_round_info_now(round_info);
+        return [round_num, price_ticket, time_fn];
+    }
+
+    var get_win_combo_from_round(int round) method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user  ) = unpack_data();
+        (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell win_list_users) = get_round_info_now(round_info);
+        var (win_comb_round, f_win_comb_round?) = win_combo_hist.udict_get?(32, round);
+        int win_combo = -1;
+        if(f_win_comb_round?) {
+            win_combo = win_comb_round~load_uint(32);
+        } 
+        return win_combo;
+    }
+
+    var get_win_list_users_from_round(int round, int ids_min, int ids_max) method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user  ) = unpack_data();
+            (cell win_list, cell coincidences_info) = get_win_infos(win_info);
+        var (win_list_user_round, f_win_list_user?) = win_list.udict_get?(32, round);
+        var l = empty_tuple();
+        if(f_win_list_user?) {
+            var id = ids_min;
+            cell win_list_user_round_c = win_list_user_round~load_dict();
+            do {
+                    (id, var cs, var f) = win_list_user_round_c.udict_get_next?(32, id);
+                if (f) {
+                    if(id <= ids_max) {
+                        var (number_coincidences, ticket, wc_adr, adr, user_pay_nano) = unpack_users_win(cs);
+                        l = cons([ id, number_coincidences, ticket, adr, wc_adr, user_pay_nano, round], l);
+                    } else {
+                        return l;
+                    }
+                }
+            } until (~ f);
+        }
+        return l;
+    }
+
+    var get_count_coincidences_from_round(int round) method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user  ) = unpack_data();
+            (cell win_list, cell coincidences_info) = get_win_infos(win_info);
+        var (coincidences_info_round, f_coincidences_info_round?) = coincidences_info.udict_get?(32, round);
+        if(f_coincidences_info_round?) {
+                (int cc_1, int cc_2, int cc_3, int cc_4, int cc_5, int cc_6) = unpack_coincidences_info(coincidences_info_round);
+            return [cc_1, cc_2, cc_3, cc_4, cc_5, cc_6];
+        } else {
+            return [-1,-1,-1,-1,-1,-1];
+        }
+    }
+
+    ;; HELPERS INFO method_id
+
+    var check_discount_user(int wallet_addr) method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data(); ;; TODO
+        (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell discount_list) = get_round_info_now(round_info);
+ 
+        var (user_discount, f_user_discount?) = discount_list.udict_get?(256, wallet_addr);
+        if(f_user_discount?) {
+            int discount_count = user_discount~load_uint(32);
+            return discount_count;
+        }
+        return 0;
+    }
+
+    var get_max_id_ticket_lists_for_round(int round) method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user  ) = unpack_data();
+        var (ticket_list_round, f_ticket_lists?) = ticket_lists.udict_get?(32, round);
+        if(f_ticket_lists?) {
+            cell ticket_list_round_c = ticket_list_round~load_dict();
+            var (max_id, val_max, f) = ticket_list_round_c.udict_get_max?(32);
+            return max_id;
+        } else {
+            return -1;
+        }
+    }
+
+    var get_max_id_win_list_for_round(int round) method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user  ) = unpack_data();
+        (cell win_list, cell coincidences_info) = get_win_infos(win_info);
+        var (win_list_round, f_win_list?) = win_list.udict_get?(32, round);
+        
+        if(f_win_list?) {
+            cell win_list_round_c = win_list_round~load_dict();
+            var (max_id, val_max, f) = win_list_round_c.udict_get_max?(32);
+            return max_id;
+        } else {
+            return -1;
+        }
+    }
+
+    var get_max_and_min_round_from_win_combo_hist() method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user  ) = unpack_data();
+            (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell discount_list) = get_round_info_now(round_info);
+        int max_round = -1;
+        int min_round = -1;
+        var (max_id, val_max, f_max_val) = win_combo_hist.udict_get_max?(32);
+        if(f_max_val){
+            max_round = max_id;
+        }
+        var (min_id, val_min, f_min_val) = win_combo_hist.udict_get_min?(32);
+        if(f_min_val){
+            min_round = min_id;
+        }
+        return [min_round, max_round];
+    }
+
+    var get_max_and_min_round_from_ticket_lists() method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user  ) = unpack_data();
+        int max_round = -1;
+        int min_round = -1;
+        var (max_id, val_max, f_max_val) = ticket_lists.udict_get_max?(32);
+        if(f_max_val){
+            max_round = max_id;
+        }
+        var (min_id, val_min, f_min_val) = ticket_lists.udict_get_min?(32);
+        if(f_min_val){
+            min_round = min_id;
+        }
+        return [min_round, max_round];
+    }
+
+    var get_max_min_round_from_win_list() method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user  ) = unpack_data();
+            (cell win_list, cell coincidences_info) = get_win_infos(win_info);
+        var (max_id, val_max, f_max_val) = win_list.udict_get_max?(32);
+        int max_round = -1;
+        int min_round = -1;
+        if(f_max_val){
+            max_round = max_id;
+        }
+        var (min_id, val_min, f_min_val) = win_list.udict_get_min?(32);
+        if(f_min_val) {
+            min_round = min_id;
+        }
+        return [min_round, max_round];
+    }
+
+    var get_max_min_round_from_coincidences_info() method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user  ) = unpack_data();
+            (cell win_list, cell coincidences_info) = get_win_infos(win_info);
+        var (max_id, val_max, f_max_val) = coincidences_info.udict_get_max?(32);
+        int max_round = -1;
+        int min_round = -1;
+        if(f_max_val){
+            max_round = max_id;
+        }
+        var (min_id, val_min, f_min_val) = coincidences_info.udict_get_min?(32);
+        if(f_min_val){
+            min_round = min_id;
+        }
+        return [min_round, max_round];
+    }
+
+    ;; TEST INFO method_id
+    var get_total_bits() method_id {
+        var (bits, refs) = slice_bits_refs(begin_parse(get_data()));
+        return [bits, refs];
+    }
+
+    var get_bits_round_info() method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user  ) = unpack_data();
+        var saves = begin_parse(round_info);
+        var (bits, refs) = slice_bits_refs(saves);
+        return [bits, refs];
+    }
+
+    var get_bits_ticket_lists() method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user  ) = unpack_data();
+        var saves = begin_parse(ticket_lists);
+        var (bits, refs) = slice_bits_refs(saves);
+        return [bits, refs];
+    }
+
+    var get_bits_win_info() method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user  ) = unpack_data();
+        var saves = begin_parse(win_info);
+        var (bits, refs) = slice_bits_refs(saves);
+        return [bits, refs];
+    }
+
+    var get_bits_win_combo_hist() method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data();
+            (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell discount_list) = get_round_info_now(round_info);
+        var saves = begin_parse(win_combo_hist);
+        var (bits, refs) = slice_bits_refs(saves);
+        return [bits, refs];
+    }
+
+    var get_bits_discount_list() method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data();
+        (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell discount_list) = get_round_info_now(round_info);
+        var saves = begin_parse(discount_list);
+        var (bits, refs) = slice_bits_refs(saves);
+        return [bits, refs];
+    }
+
+    var get_bits_win_list() method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data();
+            (cell win_list, cell coincidences_info) = get_win_infos(win_info);
+        var saves = begin_parse(win_list);
+        var (bits, refs) = slice_bits_refs(saves);
+        return [bits, refs];
+    }
+
+    var get_bits_coincidences_info() method_id {
+        var (draw_balance, round_info, ticket_lists, win_info, msg_to_user ) = unpack_data();
+            (cell win_list, cell coincidences_info) = get_win_infos(win_info);
+        var saves = begin_parse(coincidences_info);
+        var (bits, refs) = slice_bits_refs(saves);
+        return [bits, refs];
+    }
