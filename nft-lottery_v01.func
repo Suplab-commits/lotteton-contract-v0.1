@@ -165,9 +165,6 @@ int gen_combination_win(int coef, int max_id) impure inline_ref {
     }
 
     (int count_ticket, int back_gramm ) =  msg_value /% price_ticket_p;
-    if ( back_gramm > 100000000) {
-        send_grams(wallet_wc, wallet_addr, back_gramm);
-    }
 
     int round_nums = round_num;
     if(now() >= time_fn) {
@@ -180,7 +177,7 @@ int gen_combination_win(int coef, int max_id) impure inline_ref {
 ;;8000 - Иницилизоровать и запустить контракт
 () init_contract(slice in_msg_body) impure {
     int price_ticket = in_msg_body~load_grams();
-    cell round_info_null = pack_round_info( price_ticket, 1, now() + (3600 * 24 ), new_dict(), new_dict()).end_cell();
+    cell round_info_null = pack_round_info( price_ticket, 1, now() + (3600), new_dict(), new_dict()).end_cell();
     cell win_info_null = begin_cell().store_dict(new_dict()).store_dict(new_dict()).end_cell();
     save_data(round_info_null, new_dict(), win_info_null);
 }
@@ -221,7 +218,7 @@ int gen_combination_win(int coef, int max_id) impure inline_ref {
     var ( round_info, ticket_lists, win_info) = unpack_data();
     (int price_ticket, int round_num, int time_fn, cell win_combo_hist, cell discount_list) = get_round_info_now(round_info);
     if ( now() >= time_fn) {
-        cell round_info_new = pack_round_info(price_ticket, round_num + 1, now() + (3600 * 24 ), win_combo_hist, discount_list).end_cell();
+        cell round_info_new = pack_round_info(price_ticket, round_num + 1, now() + (3600), win_combo_hist, discount_list).end_cell();
         save_data( round_info_new, ticket_lists, win_info);
     }
 }
