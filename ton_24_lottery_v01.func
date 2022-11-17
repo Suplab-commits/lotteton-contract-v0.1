@@ -247,7 +247,7 @@ int check_ticket_position(int user_ticket, int win_ticket) inline_ref  {
 
 () init_contract(slice in_msg_body) impure {
     int price_ticket = in_msg_body~load_grams();
-    cell round_info_null = pack_round_info( price_ticket, 2, 1668703696, new_dict(), new_dict()).end_cell();
+    cell round_info_null = pack_round_info( price_ticket, 1, now() + (3600), new_dict(), new_dict()).end_cell();
     cell win_info_null = begin_cell().store_dict(new_dict()).store_dict(new_dict()).end_cell();
 
     cell dict_body_msg = begin_cell().store_slice(in_msg_body).end_cell();
